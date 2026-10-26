@@ -2,7 +2,7 @@
 # gh-sage7 — GitHub CLI extension entrypoint.
 #
 # Install:
-#   gh extension install <owner>/gh-sage7
+#   gh extension install TheLionKing7/gh-sage7
 #
 # Usage:
 #   gh sage7 scan [options]
@@ -13,6 +13,9 @@
 #   3. <this dir>/scripts/sage7-scan.ts and ../scripts/sage7-scan.ts
 #   4. ./scripts/sage7-scan.ts        (running inside a repo that vendors the scanner)
 #   5. npx --yes @sage7/scan          (published package, zero-install)
+#
+# TypeScript execution falls back from native type stripping to tsx/bun, so the
+# extension still works on Node < 22.6 and on Node builds without strip-types.
 set -euo pipefail
 
 # `gh` forwards everything after `sage7`, e.g. `gh sage7 scan --sarif out.sarif`.
@@ -25,6 +28,45 @@ if [ -n "${SAGE7_SCAN_BIN:-}" ]; then
   exec "$SAGE7_SCAN_BIN" "$@"
 fi
 
+# Prints the first major.minor version of a runtime, or nothing when absent.
+node_minor_version() {
+  node -p 'process.versions.node.split(".").slice(0, 2).join(".")' 2>/dev/null || true
+}
+
+# Native `--experimental-strip-types` needs Node >= 22.6.
+node_supports_strip_types() {
+  local version
+  version="$(node_minor_version)"
+  [ -n "$version" ] || return 1
+  local major="${version%%.*}"
+  local minor="${version#*.}"
+  [ "$major" -gt 22 ] && return 0
+  [ "$major" -eq 22 ] && [ "$minor" -ge 6 ] && return 0
+  return 1
+}
+
+run_ts_script() {
+  local script="$1"
+  shift
+
+  # exec replaces the shell, so a failing run reports its own status instead of
+  # falling through to the next candidate.
+  if node_supports_strip_types; then
+    exec node --experimental-strip-types "$script" "$@"
+  fi
+
+  if command -v npx >/dev/null 2>&1; then
+    exec npx --yes tsx "$script" "$@"
+  fi
+
+  if command -v bun >/dev/null 2>&1; then
+    exec bun "$script" "$@"
+  fi
+
+  echo "gh-sage7: cannot execute $script - install Node >= 22.6, or tsx/bun." >&2
+  return 1
+}
+
 script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 
 for candidate in \
@@ -36,8 +78,7 @@ for candidate in \
 do
   [ -n "$candidate" ] || continue
   [ -f "$candidate" ] || continue
-  # Node >= 22.6 strips TypeScript types natively.
-  exec node --experimental-strip-types "$candidate" "$@"
+  run_ts_script "$candidate" "$@"
 done
 
 exec npx --yes @sage7/scan "$@"
