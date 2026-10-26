@@ -1,0 +1,56 @@
+name: Sage 7 Reachability & Security Scan
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  sage7-security:
+    name: Sage 7 Reachability Scan (T0-T3)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run Sage 7 Scanner (SARIF + Cloud Ingest)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SAGE7_PROJECT_TOKEN: ${{ secrets.SAGE7_PROJECT_TOKEN }}
+          SAGE7_API_URL: ${{ vars.SAGE7_API_URL || 'https://sage7.dev' }}
+        run: |
+          gh extension install TheLionKing7/gh-sage7
+
+          if [ -n "${SAGE7_PROJECT_TOKEN:-}" ]; then
+            gh sage7 scan \
+              --sarif results.sarif \
+              --token "$SAGE7_PROJECT_TOKEN" \
+              --api-url "$SAGE7_API_URL" \
+              --target "${{ github.repository }}" \
+              --commit "${{ github.sha }}" \
+              --branch "${{ github.ref_name }}"
+          else
+            gh sage7 scan \
+              --sarif results.sarif \
+              --target "${{ github.repository }}" \
+              --commit "${{ github.sha }}" \
+              --branch "${{ github.ref_name }}"
+          fi
+
+      - name: Upload SARIF to GitHub Code Scanning
+        if: always() && hashFiles('results.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: results.sarif
+          category: sage7-reachability

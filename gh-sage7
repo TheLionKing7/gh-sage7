@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+# gh-sage7 — GitHub CLI extension entrypoint.
+#
+# Install:
+#   gh extension install <owner>/gh-sage7
+#
+# Usage:
+#   gh sage7 scan [options]
+#
+# Resolution order for the scanner:
+#   1. $SAGE7_SCAN_BIN               (explicit binary/command override)
+#   2. $SAGE7_SCAN_SCRIPT            (explicit path to sage7-scan.ts)
+#   3. <this dir>/scripts/sage7-scan.ts and ../scripts/sage7-scan.ts
+#   4. ./scripts/sage7-scan.ts        (running inside a repo that vendors the scanner)
+#   5. npx --yes @sage7/scan          (published package, zero-install)
+set -euo pipefail
+
+# `gh` forwards everything after `sage7`, e.g. `gh sage7 scan --sarif out.sarif`.
+# Drop a leading `scan` so `gh sage7 scan` and `gh sage7` behave identically.
+if [ "${1:-}" = "scan" ]; then
+  shift
+fi
+
+if [ -n "${SAGE7_SCAN_BIN:-}" ]; then
+  exec "$SAGE7_SCAN_BIN" "$@"
+fi
+
+script_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+for candidate in \
+  "${SAGE7_SCAN_SCRIPT:-}" \
+  "$script_dir/scripts/sage7-scan.ts" \
+  "$script_dir/../scripts/sage7-scan.ts" \
+  "$script_dir/sage7-scan.ts" \
+  "$PWD/scripts/sage7-scan.ts"
+do
+  [ -n "$candidate" ] || continue
+  [ -f "$candidate" ] || continue
+  # Node >= 22.6 strips TypeScript types natively.
+  exec node --experimental-strip-types "$candidate" "$@"
+done
+
+exec npx --yes @sage7/scan "$@"

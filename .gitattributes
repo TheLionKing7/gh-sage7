@@ -1,0 +1,4 @@
+# The gh extension entrypoint is executed by bash; CRLF would break the shebang.
+* text=auto eol=lf
+*.sh text eol=lf
+gh-sage7 text eol=lf
